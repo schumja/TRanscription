@@ -1,0 +1,159 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{TRanscription}[2019/03/25 LaTeX package for transcriptions]
+
+\RequirePackage{datatool}
+\RequirePackage{xparse}
+\RequirePackage{ifthen}
+
+
+\DeclareOption{overwrite}{\setboolean{TRoverwrite}{true}}
+\DeclareOption*{\PackageWarning{TRanscription}{Unknown ‘\CurrentOption’}}
+\ProcessOptions\relax
+
+
+%used counters for output 
+\newcounter{TRtransfromCnt}
+\newcounter{TRtranstoCnt}
+%Counter for writing a new transcript
+\newcounter{TRwriteCnt}
+%counter for writing new instructions to the transcript
+\newcounter{TRregieCnt}
+\newcounter{TRoutputCnt}
+\setcounter{TRoutputCnt}{0}
+%This command is used to store the DB name
+\newcommand{\TRdatabase}{}
+\newcommand{\TRenvname}{Transkript}
+
+%Booleans, which are used
+\newboolean{TRfileexists}
+\newboolean{TRoverwrite}
+
+\setboolean{TRfileexists}{false}
+\setboolean{TRoverwrite}{false}
+
+
+
+\NewDocumentEnvironment{TRanscription} { o }
+{
+	%\leftskip=2cm
+}
+{
+	\refstepcounter{TRoutputCnt}
+	\IfNoValueTF{#1} {}{\TRenvname~\theTRoutputCnt:~#1 }
+	\leftskip=0cm \par\ \par
+}
+
+
+
+%Output from one line; arguemnts are row number, speaker and spoken text
+\newcommand{\TRprintline}[3]{
+	\noindent\parbox[t]{0.05\textwidth}{\hfill \texttt{#1}}\hspace{0.05\textwidth}\parbox[t]{0.2\textwidth}{\texttt{#2}}\parbox[t]{0.7\textwidth}{\texttt{#3}}\\
+}
+
+%output of an instruction. the only arguemnt is the instruction itself
+\newcommand{\TRprintcomments}[1]{
+	\framebox[\linewidth]{\textbf{#1}}
+}
+
+%\TRprintfromto{<transcriptname>}{<startrow>}{<endrow>} outputs the transcript <transcriptname> from row <startrow> to <endrow>
+\newcommand{\TRprintfromto}[3]{
+	\DTLsetseparator{;}
+	
+	%Überprüfen, ob DB schon geladen wurde. Ansonsten wird sie geladen
+	\DTLifdbexists{#1}{}{\DTLloaddb{#1}{#1.csv}}
+	%Bestimmen der Start- und Endzeile der csv-Datei
+	\dtlgetrowindex{\TRtransstart}{#1}{1}{#2}
+	\setcounter{TRtransfromCnt}{\TRtransstart}
+	\dtlgetrowindex{\TRtransend}{#1}{1}{#3}
+	\setcounter{TRtranstoCnt}{\TRtransend}
+	\refstepcounter{TRtranstoCnt}
+	\whiledo {\value{TRtransfromCnt} < \value{TRtranstoCnt}}
+	{
+		\DTLassign{#1}{\value{TRtransfromCnt}}{\row=row,\speaker=speaker,\spoken=text}
+		\ifthenelse{\equal{\row}{R}}{ %Regieanweisungen haben anstatt einer Zeilennummer ein R
+			%Ausgabe von Regieanweisungen
+			\TRprintcomments{\spoken}
+			\refstepcounter{TRtransfromCnt}
+		}{
+			%Ausgabe einer Transkriptzeile
+			\TRprintline{\row}{\speaker}{\spoken}
+			\refstepcounter{TRtransfromCnt}%
+		}
+		
+	}
+}
+
+%\TRprintcomplete{<Transkriptname>} gibt das Transkript <Transkriptname> komplett aus
+\newcommand{\TRprintcomplete}[1]{
+	\DTLsetseparator{;}
+	%Überprüfen, ob DB schon geladen wurde. Ansonsten wird sie geladen
+	\DTLifdbexists{#1}{}{\DTLloaddb{#1}{#1.csv}}
+	%Bestimmen der Start- und Endzeile der csv-Datei
+	\DTLforeach{#1}{\row=row,\speaker=speaker,\spoken=text}{%
+		\ifthenelse{\equal{\row}{R}}{
+			\TRprintcomments{\speaker}
+		}{
+			%Ausgabe einer Transkriptzeile
+			\TRprintline{\row}{\speaker}{\spoken}
+		}
+		
+	}
+}
+\newcommand{\TRselectdb}[1]{
+	\renewcommand{\TRdatabase}{#1}	
+}
+
+
+\newcommand{\TRcreatetranscript}[1]{
+	
+	\IfFileExists{transcripts/#1.csv}{ %Überprüfen, ob die Datei schon vorhanden ist, Wenn ja wird diese nicht überschrieben.
+		\GenericWarning{}{LaTeX Warning: The following File already exists: #1.csv. Es wurden keine Daten gespeichert.}
+		\setboolean{TRfileexists}{true}
+	}{
+	}
+	\DTLnewdb{#1}
+	\DTLaddcolumn{#1}{row}
+	\DTLaddcolumn{#1}{speaker}
+	\DTLaddcolumn{#1}{text}
+	\setcounter{TRwriteCnt}{1}
+	\setcounter{TRregieCnt}{1}
+	\TRselectdb{#1}
+}
+
+%Fügt eine neue Zeile zu der Datenbank hinzu
+\newcommand{\TRwriteline}[2]{
+	\DTLnewrow{\TRdatabase}
+	\ifthenelse{\equal{#1}{Regie}}{ %Dies unterscheidet, ob es sich um ein Sprechakt oder eine Information handelt
+		\DTLnewdbentry{\TRdatabase}{row}{R}
+		\begingroup \dtlexpandnewvalue
+		\DTLnewdbentry{\TRdatabase}{speaker}{\theTRregieCnt}
+		\endgroup
+		\DTLnewdbentry{\TRdatabase}{text}{#2}
+		\stepcounter{TRregieCnt}		
+	}
+	{
+		\begingroup \dtlexpandnewvalue
+		\DTLnewdbentry{\TRdatabase}{row}{\theTRwriteCnt}
+		\endgroup
+		\DTLnewdbentry{\TRdatabase}{speaker}{#1}
+		\DTLnewdbentry{\TRdatabase}{text}{#2}
+		\stepcounter{TRwriteCnt}
+		
+	}
+}
+
+%Schreibt die aktuelle Datenbank in eine Datei
+\newcommand{\TRwritetofile}{
+	
+	
+	\ifthenelse{\boolean{TRfileexists} \and \not \boolean{TRoverwrite}}{
+	}{
+		\DTLsetdelimiter{"}
+		\DTLsetseparator{;}
+		\DTLsavedb{\TRdatabase}{transcripts/\TRdatabase.csv}
+	}
+	\DTLdeletedb{\TRdatabase}
+	\renewcommand{\TRdatabase}{}
+	
+}
+
